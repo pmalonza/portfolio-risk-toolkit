@@ -12,6 +12,7 @@ def test_build_parser_defaults():
     assert args.alpha == 0.95
     assert args.plot_dir is None
     assert args.tickers is None
+    assert args.dist == "normal"
 
 
 def test_run_returns_all_three_methods_and_backtest():
@@ -49,6 +50,20 @@ def test_three_methods_agree_closely_on_near_normal_data():
     results = run(args)
     var_values = [results[k]["var"] for k in ("historical", "parametric", "monte_carlo")]
     assert max(var_values) - min(var_values) < 0.003
+
+
+def test_dist_t_uses_student_t_fit():
+    parser = build_parser()
+    args = parser.parse_args(["--n-days", "1000", "--n-sims", "5000", "--seed", "5", "--dist", "t"])
+    results = run(args)
+    assert results["parametric"]["var"] > 0
+    assert results["parametric"]["cvar"] >= results["parametric"]["var"]
+
+
+def test_dist_t_label_appears_in_printed_output(capsys):
+    main(["--n-days", "300", "--n-sims", "2000", "--seed", "6", "--dist", "t"])
+    captured = capsys.readouterr()
+    assert "Parametric (Student-t)" in captured.out
 
 
 def _fake_load_market_returns(tickers, period="2y", start=None, end=None):
