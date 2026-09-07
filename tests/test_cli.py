@@ -1,3 +1,6 @@
+import numpy as np
+import pytest
+
 from portfolio_risk.cli import build_parser, main, run
 
 
@@ -8,6 +11,7 @@ def test_build_parser_defaults():
     assert args.n_days == 1500
     assert args.alpha == 0.95
     assert args.plot_dir is None
+    assert args.tickers is None
 
 
 def test_run_returns_all_three_methods_and_backtest():
@@ -45,3 +49,31 @@ def test_three_methods_agree_closely_on_near_normal_data():
     results = run(args)
     var_values = [results[k]["var"] for k in ("historical", "parametric", "monte_carlo")]
     assert max(var_values) - min(var_values) < 0.003
+
+
+def _fake_load_market_returns(tickers, period="2y", start=None, end=None):
+    rng = np.random.default_rng(0)
+    n_days = 300
+    returns = rng.normal(loc=0.0003, scale=0.015, size=(n_days, len(tickers)))
+    dates = list(range(n_days))
+    return returns, dates, list(tickers)
+
+
+def test_run_with_tickers_uses_market_data(monkeypatch):
+    monkeypatch.setattr("portfolio_risk.cli.load_market_returns", _fake_load_market_returns)
+    parser = build_parser()
+    args = parser.parse_args(["--tickers", "AAPL", "MSFT", "GOOG", "--n-sims", "5000"])
+    results = run(args)
+    assert results["meta"]["source"] == "market"
+    assert results["meta"]["tickers"] == ["AAPL", "MSFT", "GOOG"]
+    assert results["historical"]["var"] > 0
+
+
+def test_run_rejects_mismatched_weights_length(monkeypatch):
+    monkeypatch.setattr("portfolio_risk.cli.load_market_returns", _fake_load_market_returns)
+    parser = build_parser()
+    args = parser.parse_args(
+        ["--tickers", "AAPL", "MSFT", "GOOG", "--weights", "0.5", "0.5", "--n-sims", "5000"]
+    )
+    with pytest.raises(ValueError):
+        run(args)
