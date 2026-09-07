@@ -83,14 +83,17 @@ pip install -e ".[dev,market-data]"
 portfolio-risk --n-assets 5 --n-days 1500 --alpha 0.95 --n-sims 100000 --plot-dir output/
 ```
 
-```
-Portfolio Risk Toolkit -- 5 assets, 1500 days, alpha=95%
+Add `--dist t` to fit a Student-t distribution for the parametric method
+instead of Normal (fatter tails, usually a better fit for real returns):
 
-Method                 VaR        CVaR
---------------------------------------
-Historical          0.8293%     1.0376%
-Parametric          0.8218%     1.0367%
-Monte Carlo         0.8066%     1.0149%
+```
+Portfolio Risk Toolkit -- 5 synthetic assets, 1500 days, alpha=95%
+
+Method                           VaR        CVaR
+------------------------------------------------
+Historical                   0.8293%     1.0376%
+Parametric (Normal)          0.8218%     1.0367%
+Monte Carlo                  0.8066%     1.0149%
 
 Kupiec backtest (out-of-sample):
   observations:  600
@@ -134,11 +137,11 @@ portfolio-risk --tickers AAPL MSFT GOOG AMZN --period 2y --alpha 0.95
 ```
 Portfolio Risk Toolkit -- AAPL, MSFT, GOOG, AMZN (501 real trading days), alpha=95%
 
-Method                 VaR        CVaR
---------------------------------------
-Historical          2.3009%     3.1426%
-Parametric          2.2762%     2.8810%
-Monte Carlo         2.2869%     2.8841%
+Method                           VaR        CVaR
+------------------------------------------------
+Historical                   2.3009%     3.1426%
+Parametric (Normal)          2.2762%     2.8810%
+Monte Carlo                  2.2869%     2.8841%
 
 Kupiec backtest (out-of-sample):
   observations:  201
