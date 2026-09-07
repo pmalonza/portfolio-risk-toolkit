@@ -14,7 +14,7 @@ from .data import aggregate_portfolio_returns, equal_weights, generate_synthetic
 from .historical import historical_cvar, historical_var
 from .market_data import fit_moments, load_market_returns
 from .monte_carlo import monte_carlo_cvar, monte_carlo_var
-from .parametric import fit_normal, normal_cvar, normal_var
+from .parametric import fit_normal, fit_student_t, normal_cvar, normal_var, student_t_cvar, student_t_var
 from .plotting import plot_exceedances, plot_var_comparison
 
 
@@ -42,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Portfolio weights matching --tickers order (must sum to 1); defaults to equal-weight",
+    )
+    parser.add_argument(
+        "--dist",
+        choices=["normal", "t"],
+        default="normal",
+        help="Distribution fitted for the parametric method: Normal, or Student-t for fatter tails",
     )
     parser.add_argument("--alpha", type=float, default=0.95, help="VaR/CVaR confidence level")
     parser.add_argument("--n-sims", type=int, default=100_000, help="Number of Monte Carlo scenarios")
@@ -75,9 +81,14 @@ def run(args: argparse.Namespace) -> dict:
     hist_var = historical_var(portfolio_returns, args.alpha)
     hist_cvar = historical_cvar(portfolio_returns, args.alpha)
 
-    fit = fit_normal(portfolio_returns)
-    param_var = normal_var(fit, args.alpha)
-    param_cvar = normal_cvar(fit, args.alpha)
+    if args.dist == "t":
+        fit = fit_student_t(portfolio_returns)
+        param_var = student_t_var(fit, args.alpha)
+        param_cvar = student_t_cvar(fit, args.alpha)
+    else:
+        fit = fit_normal(portfolio_returns)
+        param_var = normal_var(fit, args.alpha)
+        param_cvar = normal_cvar(fit, args.alpha)
 
     mc_var = monte_carlo_var(mu, cov, weights, alpha=args.alpha, n_sims=args.n_sims, seed=args.seed)
     mc_cvar = monte_carlo_cvar(mu, cov, weights, alpha=args.alpha, n_sims=args.n_sims, seed=args.seed)
@@ -117,12 +128,17 @@ def _print_results(args: argparse.Namespace, results: dict) -> None:
     else:
         portfolio_desc = f"{args.n_assets} synthetic assets, {meta['n_days']} days"
     print(f"Portfolio Risk Toolkit -- {portfolio_desc}, alpha={args.alpha:.0%}\n")
-    header = f"{'Method':<14}{'VaR':>12}{'CVaR':>12}"
+    header = f"{'Method':<24}{'VaR':>12}{'CVaR':>12}"
     print(header)
     print("-" * len(header))
-    for name, key in (("Historical", "historical"), ("Parametric", "parametric"), ("Monte Carlo", "monte_carlo")):
+    dist_label = "Student-t" if args.dist == "t" else "Normal"
+    for name, key in (
+        ("Historical", "historical"),
+        (f"Parametric ({dist_label})", "parametric"),
+        ("Monte Carlo", "monte_carlo"),
+    ):
         row = results[key]
-        print(f"{name:<14}{row['var']:>12.4%}{row['cvar']:>12.4%}")
+        print(f"{name:<24}{row['var']:>12.4%}{row['cvar']:>12.4%}")
 
     bt = results["backtest"]
     print("\nKupiec backtest (out-of-sample):")
