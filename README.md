@@ -20,7 +20,12 @@ is exactly why practitioners run all three side by side:
 
 On the synthetic near-normal data this toolkit generates, all three agree
 closely — which is itself a useful sanity check: if they diverge sharply,
-that's usually a sign of fat tails, skew, or a bug.
+that's usually a sign of fat tails, skew, or a bug. Real market data makes
+that divergence concrete: fitting a 4-stock portfolio (AAPL/MSFT/GOOG/AMZN,
+2 years of history) gives a fitted Student-t of **~4.15 degrees of
+freedom** — real markets have visibly fatter tails than the Normal
+assumption, which is exactly the kind of thing this comparison is meant to
+surface. See [Real market data](#real-market-data) below.
 
 ## Symbolic derivation
 
@@ -62,6 +67,12 @@ cd portfolio-risk-toolkit
 python -m venv .venv
 source .venv/bin/activate  # .venv\Scripts\activate on Windows
 pip install -e ".[dev]"
+```
+
+To also run on real market data, install the optional extra:
+
+```bash
+pip install -e ".[dev,market-data]"
 ```
 
 ## Usage
@@ -110,11 +121,56 @@ var_mc = monte_carlo_var(mu, cov, weights, alpha=0.99, n_sims=200_000, seed=123)
 See [`examples/example_run.py`](examples/example_run.py) for a complete
 walkthrough that also runs the symbolic cross-check and the backtest.
 
+## Real market data
+
+Everything above also runs on real historical prices via the optional
+`market-data` extra (`yfinance`) — swap `--n-assets`/`--n-days` for
+`--tickers`:
+
+```bash
+portfolio-risk --tickers AAPL MSFT GOOG AMZN --period 2y --alpha 0.95
+```
+
+```
+Portfolio Risk Toolkit -- AAPL, MSFT, GOOG, AMZN (501 real trading days), alpha=95%
+
+Method                 VaR        CVaR
+--------------------------------------
+Historical          2.3009%     3.1426%
+Parametric          2.2762%     2.8810%
+Monte Carlo         2.2869%     2.8841%
+
+Kupiec backtest (out-of-sample):
+  observations:  201
+  exceedances:   7 (expected 10.1)
+  LR statistic:  1.0852 (critical value 3.8415)
+  p-value:       0.2975
+  verdict:       not rejected - well-calibrated
+```
+
+`--weights` sets a custom allocation (must match `--tickers` order and sum
+to 1); it defaults to equal-weight. As a library:
+
+```python
+from portfolio_risk.market_data import load_market_returns, fit_moments
+from portfolio_risk.data import aggregate_portfolio_returns, equal_weights
+
+returns, dates, tickers = load_market_returns(["AAPL", "MSFT", "GOOG"], period="2y")
+weights = equal_weights(len(tickers))
+portfolio_returns = aggregate_portfolio_returns(returns, weights)
+mu, cov = fit_moments(returns)  # feed straight into monte_carlo_var/cvar
+```
+
+See [`examples/real_portfolio_example.py`](examples/real_portfolio_example.py)
+for a full walkthrough, including the Normal-vs-Student-t comparison that
+surfaces real fat tails.
+
 ## Project structure
 
 ```
 src/portfolio_risk/
     data.py         synthetic multi-asset return generation + portfolio aggregation
+    market_data.py  real historical prices via yfinance (optional; network required)
     historical.py   historical simulation VaR/CVaR
     parametric.py   parametric variance-covariance VaR/CVaR (Normal, Student-t)
     monte_carlo.py  Monte Carlo VaR/CVaR via simulated scenarios
@@ -123,13 +179,22 @@ src/portfolio_risk/
     plotting.py      Matplotlib comparison and exceedance plots
     cli.py           command-line entry point
 tests/               pytest suite, one file per module
-examples/            example_run.py -- a full library-usage walkthrough
+examples/            example_run.py, real_portfolio_example.py
 ```
 
 ## Running tests
 
 ```bash
 pytest -q
+```
+
+`tests/test_market_data.py` includes one test marked `network` that makes a
+real call to Yahoo Finance; it's excluded by default (see the `markers`
+config in `pyproject.toml`) so the suite stays fast and CI-safe. Run it
+explicitly with:
+
+```bash
+pytest -m network tests/test_market_data.py
 ```
 
 ## License
