@@ -1,8 +1,137 @@
 # Portfolio Risk Toolkit
 
-A small toolkit for computing Value-at-Risk (VaR) and Conditional VaR (CVaR /
-Expected Shortfall) for a multi-asset portfolio using three independent
-methods, plus a symbolic derivation of the parametric formula and a
-statistical backtest of model calibration.
+[![CI](https://github.com/pmalonza/portfolio-risk-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/pmalonza/portfolio-risk-toolkit/actions/workflows/ci.yml)
 
-Work in progress — see commit history for build order.
+A small toolkit for computing **Value-at-Risk (VaR)** and **Conditional
+VaR / Expected Shortfall (CVaR)** for a multi-asset portfolio using three
+independent methods, a from-first-principles symbolic derivation of the
+parametric formula, and a statistical backtest of model calibration.
+
+## Why three methods
+
+Each method makes different assumptions and fails in different ways, which
+is exactly why practitioners run all three side by side:
+
+| Method | Assumption | Module |
+|---|---|---|
+| **Historical simulation** | None — uses the empirical loss quantile directly | `historical.py` |
+| **Parametric (variance-covariance)** | Losses follow a fitted Normal or Student-t distribution | `parametric.py` |
+| **Monte Carlo** | Assets follow a fitted multivariate Normal; simulate scenarios, then aggregate | `monte_carlo.py` |
+
+On the synthetic near-normal data this toolkit generates, all three agree
+closely — which is itself a useful sanity check: if they diverge sharply,
+that's usually a sign of fat tails, skew, or a bug.
+
+## Symbolic derivation
+
+`symbolic.py` derives the parametric Normal CVaR formula from scratch with
+SymPy rather than just citing it. The key step is the tail-expectation
+integral for a standard normal:
+
+```
+integral_{a}^{infinity} z * phi(z) dz = phi(a)
+```
+
+which SymPy confirms directly (`phi' (z) = -z * phi(z)`, so `z*phi(z)` is an
+exact derivative). Combining that with the tail probability `(1 - alpha)`
+gives the closed-form expected-shortfall multiplier, and the full CVaR
+formula for a location-scale Normal loss:
+
+```
+CVaR_alpha = -mu + sigma * phi(z_alpha) / (1 - alpha)
+```
+
+The derivation is cross-checked numerically against `scipy.stats.norm`
+across multiple confidence levels and `(mu, sigma)` combinations in
+`tests/test_symbolic.py` — see `verify_against_scipy()`.
+
+## Backtesting
+
+`backtest.py` implements the Kupiec (1995) proportion-of-failures test: it
+counts how often realized losses exceeded the VaR estimate and runs a
+likelihood-ratio test (chi-squared, 1 degree of freedom) of whether that
+exceedance rate is statistically consistent with the model's nominal
+`(1 - alpha)` rate — i.e. whether the VaR model is well-calibrated rather
+than systematically too tight or too loose.
+
+## Installation
+
+```bash
+git clone https://github.com/pmalonza/portfolio-risk-toolkit.git
+cd portfolio-risk-toolkit
+python -m venv .venv
+source .venv/bin/activate  # .venv\Scripts\activate on Windows
+pip install -e ".[dev]"
+```
+
+## Usage
+
+### CLI
+
+```bash
+portfolio-risk --n-assets 5 --n-days 1500 --alpha 0.95 --n-sims 100000 --plot-dir output/
+```
+
+```
+Portfolio Risk Toolkit -- 5 assets, 1500 days, alpha=95%
+
+Method                 VaR        CVaR
+--------------------------------------
+Historical          0.8293%     1.0376%
+Parametric          0.8218%     1.0367%
+Monte Carlo         0.8066%     1.0149%
+
+Kupiec backtest (out-of-sample):
+  observations:  600
+  exceedances:   41 (expected 30.0)
+  LR statistic:  3.8284 (critical value 3.8415)
+  p-value:       0.0504
+  verdict:       not rejected - well-calibrated
+```
+
+### As a library
+
+```python
+from portfolio_risk.data import generate_synthetic_returns, aggregate_portfolio_returns
+from portfolio_risk.historical import historical_var, historical_cvar
+from portfolio_risk.parametric import fit_normal, normal_var, normal_cvar
+from portfolio_risk.monte_carlo import monte_carlo_var, monte_carlo_cvar
+
+returns, mu, cov = generate_synthetic_returns(n_assets=4, n_days=2000, seed=123)
+weights = [0.40, 0.30, 0.20, 0.10]
+portfolio_returns = aggregate_portfolio_returns(returns, weights)
+
+var_hist = historical_var(portfolio_returns, alpha=0.99)
+fit = fit_normal(portfolio_returns)
+var_param = normal_var(fit, alpha=0.99)
+var_mc = monte_carlo_var(mu, cov, weights, alpha=0.99, n_sims=200_000, seed=123)
+```
+
+See [`examples/example_run.py`](examples/example_run.py) for a complete
+walkthrough that also runs the symbolic cross-check and the backtest.
+
+## Project structure
+
+```
+src/portfolio_risk/
+    data.py         synthetic multi-asset return generation + portfolio aggregation
+    historical.py   historical simulation VaR/CVaR
+    parametric.py   parametric variance-covariance VaR/CVaR (Normal, Student-t)
+    monte_carlo.py  Monte Carlo VaR/CVaR via simulated scenarios
+    symbolic.py      SymPy derivation of the parametric CVaR formula
+    backtest.py      Kupiec proportion-of-failures backtest
+    plotting.py      Matplotlib comparison and exceedance plots
+    cli.py           command-line entry point
+tests/               pytest suite, one file per module
+examples/            example_run.py -- a full library-usage walkthrough
+```
+
+## Running tests
+
+```bash
+pytest -q
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
