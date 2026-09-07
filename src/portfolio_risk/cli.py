@@ -7,9 +7,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
+
 from .backtest import kupiec_pof_test
 from .data import aggregate_portfolio_returns, equal_weights, generate_synthetic_returns
 from .historical import historical_cvar, historical_var
+from .market_data import fit_moments, load_market_returns
 from .monte_carlo import monte_carlo_cvar, monte_carlo_var
 from .parametric import fit_normal, normal_cvar, normal_var
 from .plotting import plot_exceedances, plot_var_comparison
@@ -22,6 +25,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--n-assets", type=int, default=5, help="Number of assets in the synthetic portfolio")
     parser.add_argument("--n-days", type=int, default=1500, help="Number of simulated daily return observations")
+    parser.add_argument(
+        "--tickers",
+        nargs="+",
+        default=None,
+        metavar="TICKER",
+        help="Use real historical prices for these tickers instead of synthetic data (requires "
+        "the 'market-data' extra and network access), e.g. --tickers AAPL MSFT GOOG",
+    )
+    parser.add_argument(
+        "--period", default="2y", help="History window for --tickers, e.g. 6mo, 1y, 2y, 5y (yfinance format)"
+    )
+    parser.add_argument(
+        "--weights",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Portfolio weights matching --tickers order (must sum to 1); defaults to equal-weight",
+    )
     parser.add_argument("--alpha", type=float, default=0.95, help="VaR/CVaR confidence level")
     parser.add_argument("--n-sims", type=int, default=100_000, help="Number of Monte Carlo scenarios")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
@@ -36,10 +57,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict:
-    returns, mu, cov = generate_synthetic_returns(
-        n_assets=args.n_assets, n_days=args.n_days, seed=args.seed
-    )
-    weights = equal_weights(args.n_assets)
+    if args.tickers is not None:
+        returns, _dates, tickers = load_market_returns(args.tickers, period=args.period)
+        n_assets = len(tickers)
+        weights = np.array(args.weights) if args.weights is not None else equal_weights(n_assets)
+        if weights.shape[0] != n_assets:
+            raise ValueError(f"--weights must have {n_assets} values to match --tickers")
+        mu, cov = fit_moments(returns)
+        meta = {"source": "market", "tickers": tickers, "n_days": returns.shape[0]}
+    else:
+        returns, mu, cov = generate_synthetic_returns(n_assets=args.n_assets, n_days=args.n_days, seed=args.seed)
+        weights = equal_weights(args.n_assets)
+        meta = {"source": "synthetic", "tickers": None, "n_days": returns.shape[0]}
+
     portfolio_returns = aggregate_portfolio_returns(returns, weights)
 
     hist_var = historical_var(portfolio_returns, args.alpha)
@@ -58,6 +88,7 @@ def run(args: argparse.Namespace) -> dict:
     backtest_result = kupiec_pof_test(out_of_sample, backtest_var, alpha=args.alpha)
 
     results = {
+        "meta": meta,
         "historical": {"var": hist_var, "cvar": hist_cvar},
         "parametric": {"var": param_var, "cvar": param_cvar},
         "monte_carlo": {"var": mc_var, "cvar": mc_cvar},
@@ -80,7 +111,12 @@ def run(args: argparse.Namespace) -> dict:
 
 
 def _print_results(args: argparse.Namespace, results: dict) -> None:
-    print(f"Portfolio Risk Toolkit -- {args.n_assets} assets, {args.n_days} days, alpha={args.alpha:.0%}\n")
+    meta = results["meta"]
+    if meta["source"] == "market":
+        portfolio_desc = f"{', '.join(meta['tickers'])} ({meta['n_days']} real trading days)"
+    else:
+        portfolio_desc = f"{args.n_assets} synthetic assets, {meta['n_days']} days"
+    print(f"Portfolio Risk Toolkit -- {portfolio_desc}, alpha={args.alpha:.0%}\n")
     header = f"{'Method':<14}{'VaR':>12}{'CVaR':>12}"
     print(header)
     print("-" * len(header))
