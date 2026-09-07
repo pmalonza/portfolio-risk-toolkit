@@ -6,7 +6,7 @@ from portfolio_risk.monte_carlo import (
     monte_carlo_var,
     simulate_portfolio_returns,
 )
-from portfolio_risk.parametric import fit_normal, normal_cvar, normal_var
+from portfolio_risk.parametric import normal_cvar, normal_var
 
 
 def test_simulate_portfolio_returns_shape():
